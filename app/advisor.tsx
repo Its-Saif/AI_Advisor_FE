@@ -123,6 +123,7 @@ const AdvisorSSE = () => {
   const streamQueueRef = useRef<string[]>([]);
   const streamTimerRef = useRef<NodeJS.Timeout | null>(null);
   const streamingMsgIdRef = useRef<string | null>(null);
+  const streamingStartedRef = useRef<boolean>(false);
 
   function startDrain(assistantId: string, intervalMs = 12) {
     streamingMsgIdRef.current = assistantId;
@@ -216,32 +217,60 @@ const AdvisorSSE = () => {
 
     // Create an empty assistant message to stream tokens into
     const assistantId = String(Date.now()) + "_assistant";
-    setMessages((prev) => [...prev, { id: assistantId, role: "assistant", content: "" }]);
+    streamingStartedRef.current = false;
+    setMessages((prev) => [
+      ...prev,
+      { id: assistantId, role: "assistant", content: "Processing…" },
+    ]);
 
     const onOpen: EventSourceListener<SSEEvents> = (event) => {
-      if (event.type === "open") setStatus("retrieving");
-      if (event.type === "error") {
+      if (event.type === "open") {
+        console.log("[SSE] open");
+        setStatus("retrieving");
+      } else if (event.type === "error") {
+        console.log("[SSE] open:error", event);
         setStatus("error");
         setIsBusy(false);
       }
     };
 
-    const onProgress: EventSourceListener<SSEEvents, "progress"> = (event) => {
+    const onProgress: EventSourceListener<SSEEvents, "progress"> = (ev) => {
+      console.log("[SSE] progress", ev.data);
       try {
-        const data = JSON.parse(event.data || "{}");
+        const data = JSON.parse(ev.data || "{}");
+        let label = "Processing…";
+        if (data.stage === "retrieving") label = "Searching products…";
+        if (data.stage === "reasoning") label = "Thinking…";
+        if (data.stage === "fetching_product") label = "Fetching product details…";
+        // Update the active assistant bubble with the label only if streaming hasn't begun
+        if (!streamingStartedRef.current) {
+          setMessages((prev) =>
+            prev.map((m) => (m.id === assistantId ? { ...m, content: label } : m))
+          );
+        }
+        // Keep old status top bar in sync (optional)
         if (data.stage === "retrieving") setStatus("retrieving");
         if (data.stage === "reasoning") setStatus("reasoning");
         if (data.stage === "fetching_product") setStatus("fetching_product");
       } catch {}
     };
 
-    const onTokens: EventSourceListener<SSEEvents, "tokens"> = (event) => {
+    const onTokens: EventSourceListener<SSEEvents, "tokens"> = (ev) => {
+      console.log("[SSE] tokens", ev.data);
       let token = "";
       try {
-        const data = JSON.parse(event.data || "{}");
+        const data = JSON.parse(ev.data || "{}");
         token = data.token || "";
       } catch {}
       if (!token) return;
+
+      // First token: clear any status label in the bubble
+      if (!streamingStartedRef.current) {
+        streamingStartedRef.current = true;
+        setMessages((prev) =>
+          prev.map((m) => (m.id === assistantId ? { ...m, content: "" } : m))
+        );
+      }
 
       // enqueue characters for smooth streaming
       for (const ch of token) streamQueueRef.current.push(ch);
@@ -250,9 +279,10 @@ const AdvisorSSE = () => {
       if (!streamTimerRef.current) startDrain(assistantId, 14); // tweak speed here
     };
 
-    const onFinal: EventSourceListener<SSEEvents, "final"> = (event) => {
+    const onFinal: EventSourceListener<SSEEvents, "final"> = (ev) => {
+      console.log("[SSE] final", ev.data);
       try {
-        const data = JSON.parse(event.data || "{}");
+        const data = JSON.parse(ev.data || "{}");
         const product: Product | null = data.product || null;
         const rationale: string = data.rationale || "";
 
@@ -286,7 +316,8 @@ const AdvisorSSE = () => {
       }
     };
 
-    const onErrEvt: EventSourceListener<SSEEvents, "error"> = () => {
+    const onErrEvt: EventSourceListener<SSEEvents, "error"> = (ev) => {
+      console.log("[SSE] error", ev);
       setStatus("error");
       setIsBusy(false);
       es.removeAllEventListeners();
@@ -310,6 +341,22 @@ const AdvisorSSE = () => {
       scrollViewRef.current?.scrollToEnd({ animated: true });
     }, 80);
   }, [messages, status]);
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await fetch(`${BASE_URL}/messages`);
+        const json = await res.json();
+        const restored = (json.messages || []).map((m: any) => ({
+          id: String(m.id),
+          role: m.role,
+          content: m.content,
+          product: m.product || undefined,
+          candidates: m.candidates || undefined,
+        }));
+        setMessages(restored);
+      } catch {}
+    })();
+  }, []);
 
   const statusLabel =
     status === "idle"
@@ -395,6 +442,22 @@ const AdvisorSSE = () => {
       </ScrollView>
 
       <View style={styles.inputContainer}>
+      <TouchableOpacity
+  style={[styles.seedBtn, { marginRight: 8, backgroundColor: '#ef4444', opacity: isBusy ? 0.6 : 1 }]}
+  onPress={async () => {
+    try {
+      setIsBusy(true);
+      await fetch(`${BASE_URL}/messages/clear`, { method: 'POST' });
+      setMessages([]);
+      setStatus('idle');
+    } finally {
+      setIsBusy(false);
+    }
+  }}
+  disabled={isBusy}
+>
+  <Text style={{ color: '#fff' }}>Clear chat</Text>
+</TouchableOpacity>
         <TextInput
           style={styles.textInput}
           value={queryText}
