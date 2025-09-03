@@ -1,3 +1,4 @@
+import React, { useEffect, useRef, useState, useCallback } from "react";
 import {
   KeyboardAvoidingView,
   Platform,
@@ -8,15 +9,31 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
-import React, { useEffect, useRef, useState } from "react";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import {
-  ArrowBigLeft,
-  ArrowLeft,
-  Send,
-  ShoppingCart,
-} from "lucide-react-native";
+import { ArrowLeft, Send, ShoppingCart, Database } from "lucide-react-native";
 import { router } from "expo-router";
+import EventSource, { EventSourceListener } from "react-native-sse";
+import "react-native-url-polyfill/auto";
+
+const BASE_URL = "http://192.168.1.7:3000"; // CHANGE to your machine’s LAN IP:PORT
+
+type Product = {
+  id: string;
+  brand: string;
+  product_name: string;
+  price: number;
+  category: string;
+  description: string;
+};
+
+type ChatMsg = {
+  id: string;
+  role: "user" | "assistant";
+  content: string;
+  product?: Product | null;
+};
+
+type SSEEvents = "progress" | "final" | "error" | "tokens";
 
 const Header = () => {
   const insets = useSafeAreaInsets();
@@ -24,23 +41,16 @@ const Header = () => {
   return (
     <View
       style={{
-        // height: 80,
-        // flex: 1,
         width: "100%",
         backgroundColor: "#1e293b",
         paddingTop: top + 10,
         paddingBottom: 20,
         flexDirection: "row",
-        // justifyContent: "space-around",
       }}
     >
       <TouchableOpacity
         onPress={() => router.back()}
-        style={{
-          width: "10%",
-          justifyContent: "center",
-          alignItems: "center",
-        }}
+        style={{ width: "10%", justifyContent: "center", alignItems: "center" }}
       >
         <ArrowLeft color={"#FFD700"} size={24} />
       </TouchableOpacity>
@@ -66,26 +76,14 @@ const Header = () => {
         </Text>
       </View>
       <View
-        style={{
-          width: "10%",
-          justifyContent: "center",
-          alignItems: "center",
-        }}
+        style={{ width: "10%", justifyContent: "center", alignItems: "center" }}
       >
-        <ShoppingCart
-          color={"#FFD700"}
-          size={24}
-          style={{
-            padding: 10,
-            marginRight: 10,
-            justifyContent: "center",
-            alignItems: "center",
-          }}
-        />
+        <ShoppingCart color={"#FFD700"} size={24} />
       </View>
     </View>
   );
 };
+
 const Footer = () => {
   const insets = useSafeAreaInsets();
   const { bottom } = insets;
@@ -111,166 +109,249 @@ const Footer = () => {
   );
 };
 
-interface Message {
-  id: string;
-  text: string;
-  sender: "user" | "ai";
-  timestamp: Date;
-}
-
-const AiChat = () => {
-  const [messages, setMessages] = useState<Message[]>([]);
-  const [inputText, setInputText] = useState("");
-  const [isConnected, setIsConnected] = useState(false);
-  const websocket = useRef<WebSocket | null>(null);
+const AdvisorSSE = () => {
+  const [queryText, setQueryText] = useState("");
+  const [status, setStatus] = useState<
+    "idle" | "connecting" | "retrieving" | "reasoning" | "fetching_product" | "done" | "error"
+  >("idle");
+  const [messages, setMessages] = useState<ChatMsg[]>([]);
+  const [isBusy, setIsBusy] = useState(false);
+  const esRef = useRef<EventSource | null>(null);
   const scrollViewRef = useRef<ScrollView>(null);
 
-  // WebSocket connection
-  useEffect(() => {
-    // Use your computer's IP address instead of localhost for React Native
-    const WS_URL = "ws://192.168.1.7:8080";
+  // Streaming machinery
+  const streamQueueRef = useRef<string[]>([]);
+  const streamTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const streamingMsgIdRef = useRef<string | null>(null);
 
-    const connectWebSocket = () => {
-      try {
-        websocket.current = new WebSocket(WS_URL);
-
-        websocket.current.onopen = () => {
-          console.log("WebSocket connected");
-          setIsConnected(true);
-        };
-
-        websocket.current.onmessage = (event) => {
-          try {
-            const data = JSON.parse(event.data);
-            const aiMessage: Message = {
-              id: Date.now().toString() + "_ai",
-              text: data.message || event.data,
-              sender: "ai",
-              timestamp: new Date(),
-            };
-            setMessages((prev) => [...prev, aiMessage]);
-          } catch (error) {
-            // If not JSON, treat as plain text
-            const aiMessage: Message = {
-              id: Date.now().toString() + "_ai",
-              text: event.data,
-              sender: "ai",
-              timestamp: new Date(),
-            };
-            setMessages((prev) => [...prev, aiMessage]);
-          }
-        };
-
-        websocket.current.onclose = () => {
-          console.log("WebSocket disconnected");
-          setIsConnected(false);
-          // Attempt to reconnect after 3 seconds
-          setTimeout(() => {
-            connectWebSocket();
-          }, 3000);
-        };
-
-        websocket.current.onerror = (error) => {
-          console.error("WebSocket error:", error);
-          setIsConnected(false);
-        };
-      } catch (error) {
-        console.error("Failed to connect WebSocket:", error);
+  function startDrain(assistantId: string, intervalMs = 12) {
+    streamingMsgIdRef.current = assistantId;
+    if (streamTimerRef.current) return;
+    streamTimerRef.current = setInterval(() => {
+      const ch = streamQueueRef.current.shift();
+      if (!ch) {
+        clearInterval(streamTimerRef.current!);
+        streamTimerRef.current = null;
+        return;
       }
-    };
+      setMessages(prev =>
+        prev.map(m =>
+          m.id === streamingMsgIdRef.current ? { ...m, content: m.content + ch } : m
+        )
+      );
+    }, intervalMs);
+  }
 
-    connectWebSocket();
-
-    // Cleanup on component unmount
+  // Clean up timer when unmounting or starting a new run
+  useEffect(() => {
     return () => {
-      if (websocket.current) {
-        websocket.current.close();
+      if (streamTimerRef.current) {
+        clearInterval(streamTimerRef.current);
+        streamTimerRef.current = null;
       }
     };
   }, []);
 
-  // Auto-scroll to bottom when new messages arrive
+  useEffect(() => {
+    return () => {
+      if (esRef.current) {
+        esRef.current.removeAllEventListeners();
+        esRef.current.close();
+        esRef.current = null;
+      }
+    };
+  }, []);
+
+  const seedCatalog = useCallback(async () => {
+    try {
+      setIsBusy(true);
+      const res = await fetch(`${BASE_URL}/ingest`, { method: "POST" });
+      const json = await res.json();
+      setStatus("idle");
+      alert(json.ok ? "Ingest successful" : "Ingest failed");
+    } catch (e: any) {
+      alert("Ingest failed: " + (e?.message || "Unknown error"));
+    } finally {
+      setIsBusy(false);
+    }
+  }, []);
+
+  const startAdvice = useCallback(() => {
+    if (!queryText.trim() || isBusy) return;
+
+    // Push user message
+    const userMsg: ChatMsg = {
+      id: String(Date.now()) + "_user",
+      role: "user",
+      content: queryText.trim(),
+    };
+    setMessages((prev) => [...prev, userMsg]);
+
+    setStatus("connecting");
+    setIsBusy(true);
+
+    // reset stream buffers for new turn
+    streamQueueRef.current = [];
+    if (streamTimerRef.current) {
+      clearInterval(streamTimerRef.current);
+      streamTimerRef.current = null;
+    }
+    streamingMsgIdRef.current = null;
+
+    // Clean up any previous stream
+    if (esRef.current) {
+      esRef.current.removeAllEventListeners();
+      esRef.current.close();
+      esRef.current = null;
+    }
+
+    const url = new URL(`${BASE_URL}/advice`);
+    const es = new EventSource<SSEEvents>(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" } as any,
+      body: JSON.stringify({ query: userMsg.content }),
+      pollingInterval: 0, // do not auto-reconnect for a single run
+    });
+    esRef.current = es;
+
+    // Create an empty assistant message to stream tokens into
+    const assistantId = String(Date.now()) + "_assistant";
+    setMessages((prev) => [...prev, { id: assistantId, role: "assistant", content: "" }]);
+
+    const onOpen: EventSourceListener<SSEEvents> = (event) => {
+      if (event.type === "open") setStatus("retrieving");
+      if (event.type === "error") {
+        setStatus("error");
+        setIsBusy(false);
+      }
+    };
+
+    const onProgress: EventSourceListener<SSEEvents, "progress"> = (event) => {
+      try {
+        const data = JSON.parse(event.data || "{}");
+        if (data.stage === "retrieving") setStatus("retrieving");
+        if (data.stage === "reasoning") setStatus("reasoning");
+        if (data.stage === "fetching_product") setStatus("fetching_product");
+      } catch {}
+    };
+
+    const onTokens: EventSourceListener<SSEEvents, "tokens"> = (event) => {
+      let token = "";
+      try {
+        const data = JSON.parse(event.data || "{}");
+        token = data.token || "";
+      } catch {}
+      if (!token) return;
+
+      // enqueue characters for smooth streaming
+      for (const ch of token) streamQueueRef.current.push(ch);
+
+      // start drain loop if not running
+      if (!streamTimerRef.current) startDrain(assistantId, 14); // tweak speed here
+    };
+
+    const onFinal: EventSourceListener<SSEEvents, "final"> = (event) => {
+      try {
+        const data = JSON.parse(event.data || "{}");
+        const product: Product | null = data.product || null;
+        const rationale: string = data.rationale || "";
+
+        // attach product; keep whatever has streamed so far
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === assistantId ? { ...m, product } : m
+          )
+        );
+
+        // Optional: ensure we end exactly on final rationale once queue empties
+        // If you want a perfect match, you can do this small sync after a short delay:
+        setTimeout(() => {
+          if (!streamQueueRef.current.length && streamingMsgIdRef.current === assistantId) {
+            setMessages((prev) =>
+              prev.map((m) =>
+                m.id === assistantId ? { ...m, content: rationale } : m
+              )
+            );
+          }
+        }, 200);
+
+        setStatus("done");
+      } catch {
+        setStatus("error");
+      } finally {
+        setIsBusy(false);
+        es.removeAllEventListeners();
+        es.close();
+        esRef.current = null;
+      }
+    };
+
+    const onErrEvt: EventSourceListener<SSEEvents, "error"> = () => {
+      setStatus("error");
+      setIsBusy(false);
+      es.removeAllEventListeners();
+      es.close();
+      esRef.current = null;
+    };
+
+    es.addEventListener("open", onOpen);
+    es.addEventListener("message", onOpen); // not used by server, but safe
+    es.addEventListener("error", onOpen);
+    es.addEventListener("progress", onProgress);
+    es.addEventListener("tokens", onTokens);
+    es.addEventListener("final", onFinal);
+    es.addEventListener("error", onErrEvt);
+
+    setQueryText("");
+  }, [queryText, isBusy]);
+
   useEffect(() => {
     setTimeout(() => {
       scrollViewRef.current?.scrollToEnd({ animated: true });
-    }, 100);
-  }, [messages]);
+    }, 80);
+  }, [messages, status]);
 
-  // Function to scroll to bottom
-  const scrollToBottom = () => {
-    setTimeout(() => {
-      scrollViewRef.current?.scrollToEnd({ animated: true });
-    }, 100);
-  };
-
-  const sendMessage = () => {
-    if (inputText.trim() && websocket.current && isConnected) {
-      // Add user message to chat
-      const userMessage: Message = {
-        id: Date.now().toString() + "_user",
-        text: inputText.trim(),
-        sender: "user",
-        timestamp: new Date(),
-      };
-      setMessages((prev) => [...prev, userMessage]);
-
-      // Send message to WebSocket server
-      const messageData = {
-        message: inputText.trim(),
-        timestamp: new Date().toISOString(),
-      };
-
-      websocket.current.send(JSON.stringify(messageData));
-      setInputText("");
-    }
-  };
-
-  const renderMessage = (message: Message) => (
-    <View
-      key={message.id}
-      style={[
-        styles.messageContainer,
-        message.sender === "user" ? styles.userMessage : styles.aiMessage,
-      ]}
-    >
-      <Text
-        style={[
-          styles.messageText,
-          message.sender === "user"
-            ? styles.userMessageText
-            : styles.aiMessageText,
-        ]}
-      >
-        {message.text}
-      </Text>
-      <Text style={styles.timestamp}>
-        {message.timestamp.toLocaleTimeString([], {
-          hour: "2-digit",
-          minute: "2-digit",
-        })}
-      </Text>
-    </View>
-  );
+  const statusLabel =
+    status === "idle"
+      ? "Idle"
+      : status === "connecting"
+      ? "Connecting…"
+      : status === "retrieving"
+      ? "Searching products…"
+      : status === "reasoning"
+      ? "Thinking…"
+      : status === "fetching_product"
+      ? "Fetching product details…"
+      : status === "done"
+      ? "Done"
+      : "Error";
 
   return (
     <KeyboardAvoidingView
       style={styles.chatContainer}
       behavior={Platform.OS === "ios" ? "padding" : "height"}
     >
-      {/* Connection status */}
       <View style={styles.statusContainer}>
         <View
           style={[
             styles.statusDot,
-            { backgroundColor: isConnected ? "#10b981" : "#ef4444" },
+            {
+              backgroundColor:
+                status === "error" ? "#ef4444" : status === "done" ? "#10b981" : "#f59e0b",
+            },
           ]}
         />
-        <Text style={styles.statusText}>
-          {isConnected ? "Connected" : "Disconnected"}
-        </Text>
+        <Text style={styles.statusText}>{statusLabel}</Text>
+        <TouchableOpacity
+          style={[styles.seedBtn, { opacity: isBusy ? 0.6 : 1 }]}
+          onPress={seedCatalog}
+          disabled={isBusy}
+        >
+          <Database color="#fff" size={16} />
+          <Text style={{ color: "#fff", marginLeft: 6 }}>Seed catalog</Text>
+        </TouchableOpacity>
       </View>
 
-      {/* Messages */}
       <ScrollView
         ref={scrollViewRef}
         style={styles.messagesContainer}
@@ -280,34 +361,54 @@ const AiChat = () => {
         {messages.length === 0 ? (
           <View style={styles.emptyContainer}>
             <Text style={styles.emptyText}>
-              Start a conversation with your AI advisor
+              Describe your needs and get the best product recommendation.
             </Text>
           </View>
         ) : (
-          messages.map(renderMessage)
+          messages.map((m) => (
+            <View
+              key={m.id}
+              style={[
+                { marginVertical: 6, padding: 12, borderRadius: 12, maxWidth: "85%" },
+                m.role === "user"
+                  ? { alignSelf: "flex-end", backgroundColor: "#3b82f6" }
+                  : { alignSelf: "flex-start", backgroundColor: "#fff", borderWidth: 1, borderColor: "#e2e8f0" },
+              ]}
+            >
+              <Text style={{ color: m.role === "user" ? "#fff" : "#111827", fontSize: 15, lineHeight: 20 }}>
+                {m.content}
+                {m.role === "assistant" && streamingMsgIdRef.current === m.id && status !== "done" && status !== "error" ? " ▍" : ""}
+              </Text>
+              {m.product ? (
+                <View style={{ marginTop: 10 }}>
+                  <Text style={{ fontWeight: "600", color: "#111827" }}>
+                    {m.product.brand} — {m.product.product_name}
+                  </Text>
+                  <Text style={{ color: "#6b7280", fontSize: 12 }}>
+                    {m.product.category} • ₹{m.product.price}
+                  </Text>
+                </View>
+              ) : null}
+            </View>
+          ))
         )}
       </ScrollView>
 
-      {/* Input area */}
       <View style={styles.inputContainer}>
         <TextInput
           style={styles.textInput}
-          value={inputText}
-          onChangeText={setInputText}
-          onFocus={scrollToBottom}
-          placeholder="Type your message..."
+          value={queryText}
+          onChangeText={setQueryText}
+          placeholder="e.g., I need a device for neck and shoulder relief"
           placeholderTextColor="#9ca3af"
           multiline
-          maxLength={1000}
-          editable={isConnected}
+          maxLength={500}
+          editable={!isBusy}
         />
         <TouchableOpacity
-          style={[
-            styles.sendButton,
-            { opacity: inputText.trim() && isConnected ? 1 : 0.5 },
-          ]}
-          onPress={sendMessage}
-          disabled={!inputText.trim() || !isConnected}
+          style={[styles.sendButton, { opacity: queryText.trim() && !isBusy ? 1 : 0.5 }]}
+          onPress={startAdvice}
+          disabled={!queryText.trim() || isBusy}
         >
           <Send color="#fff" size={20} />
         </TouchableOpacity>
@@ -320,7 +421,7 @@ const advisor = () => {
   return (
     <View style={{ flex: 1 }}>
       <Header />
-      <AiChat />
+      <AdvisorSSE />
       <Footer />
     </View>
   );
@@ -337,9 +438,9 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     padding: 10,
-    backgroundColor: "#fff",
+    backgroundColor: "#1f2937",
     borderBottomWidth: 1,
-    borderBottomColor: "#e2e8f0",
+    borderBottomColor: "#0b1220",
   },
   statusDot: {
     width: 8,
@@ -349,7 +450,16 @@ const styles = StyleSheet.create({
   },
   statusText: {
     fontSize: 12,
-    color: "#64748b",
+    color: "#e5e7eb",
+    flex: 1,
+  },
+  seedBtn: {
+    flexDirection: "row",
+    backgroundColor: "#3b82f6",
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 8,
+    alignItems: "center",
   },
   messagesContainer: {
     flex: 1,
@@ -368,40 +478,6 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: "#9ca3af",
     textAlign: "center",
-  },
-  messageContainer: {
-    marginVertical: 4,
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    borderRadius: 16,
-    maxWidth: "80%",
-  },
-  userMessage: {
-    alignSelf: "flex-end",
-    backgroundColor: "#3b82f6",
-    borderBottomRightRadius: 4,
-  },
-  aiMessage: {
-    alignSelf: "flex-start",
-    backgroundColor: "#fff",
-    borderWidth: 1,
-    borderColor: "#e2e8f0",
-    borderBottomLeftRadius: 4,
-  },
-  messageText: {
-    fontSize: 16,
-    lineHeight: 20,
-  },
-  userMessageText: {
-    color: "#fff",
-  },
-  aiMessageText: {
-    color: "#1f2937",
-  },
-  timestamp: {
-    fontSize: 11,
-    marginTop: 4,
-    color: "#9ca3af",
   },
   inputContainer: {
     flexDirection: "row",
