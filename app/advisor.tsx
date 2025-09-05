@@ -23,7 +23,7 @@ import EventSource, { EventSourceListener } from "react-native-sse";
 import "react-native-url-polyfill/auto";
 import { StatusBar } from "expo-status-bar";
 
-const BASE_URL = "http://192.168.1.7:3000"; // CHANGE to your machine’s LAN IP:PORT
+const BASE_URL = `${process.env.EXPO_PUBLIC_API_BASE_URL}:3000` 
 
 type Product = {
   id: string;

@@ -22,7 +22,7 @@ type Product = {
   created_at: string;
 };
 
-const BASE_URL = "http://192.168.1.7:3000"; // align with other pages
+const BASE_URL = `${process.env.EXPO_PUBLIC_API_BASE_URL}:3000` 
 
 export default function ProductDetails() {
   const { productDetailsId:id } = useLocalSearchParams<{ productDetailsId: string }>();

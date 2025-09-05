@@ -23,7 +23,7 @@ type Product = {
   description: string;
 };
 
-const BASE_URL = "http://192.168.1.7:3000"; // align with advisor.tsx
+const BASE_URL = `${process.env.EXPO_PUBLIC_API_BASE_URL}:3000` 
 
 export default function Catalog() {
   const [query, setQuery] = useState("");
