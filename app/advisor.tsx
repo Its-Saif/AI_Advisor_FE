@@ -23,7 +23,7 @@ import EventSource, { EventSourceListener } from "react-native-sse";
 import "react-native-url-polyfill/auto";
 import { StatusBar } from "expo-status-bar";
 
-const BASE_URL = `${process.env.EXPO_PUBLIC_API_BASE_URL}:3000` 
+const BASE_URL = `${process.env.EXPO_PUBLIC_API_BASE_URL}:3000`;
 
 type Product = {
   id: string;
@@ -53,29 +53,18 @@ const Header = ({
   const insets = useSafeAreaInsets();
   const { top } = insets;
   return (
-    <View
-      style={{
-        width: "100%",
-        backgroundColor: "#F8FAFC",
-        paddingTop: top + 10,
-        paddingBottom: 16,
-        flexDirection: "row",
-        justifyContent: "space-between",
-        borderWidth: 1,
-        borderColor: "#E5E7EB",
-      }}
-    >
+    <View style={[styles.headerContainer, { paddingTop: top + 10 }]}>
       <TouchableOpacity
         onPress={() => router.back()}
-        style={{ width: "15%", justifyContent: "center", alignItems: "center" }}
+        style={styles.headerButton}
       >
-        <ArrowLeft color={"#007AFF"} size={24} />
+        <ArrowLeft color="#007AFF" size={24} />
       </TouchableOpacity>
       <TouchableOpacity
         onPress={onClearConversation}
-        style={{ width: "15%", justifyContent: "center", alignItems: "center" }}
+        style={styles.headerButton}
       >
-        <X color={"#007AFF"} size={24} />
+        <X color="#007AFF" size={24} />
       </TouchableOpacity>
     </View>
   );
@@ -101,7 +90,7 @@ const AdvisorSSE = forwardRef<AdvisorSSERef>((props, ref) => {
   const esRef = useRef<EventSource | null>(null);
   const scrollViewRef = useRef<ScrollView>(null);
 
-  // Streaming machinery
+  // Streaming logic
   const streamQueueRef = useRef<string[]>([]);
   const streamTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const streamingMsgIdRef = useRef<string | null>(null);
@@ -127,7 +116,6 @@ const AdvisorSSE = forwardRef<AdvisorSSERef>((props, ref) => {
     }, intervalMs);
   }
 
-  // Clean up timer when unmounting or starting a new run
   useEffect(() => {
     (async () => {
       try {
@@ -160,7 +148,6 @@ const AdvisorSSE = forwardRef<AdvisorSSERef>((props, ref) => {
   const startAdvice = useCallback(() => {
     if (!queryText.trim() || isBusy) return;
 
-    // Push user message
     const userMsg: ChatMsg = {
       id: String(Date.now()) + "_user",
       role: "user",
@@ -171,7 +158,6 @@ const AdvisorSSE = forwardRef<AdvisorSSERef>((props, ref) => {
     setStatus("connecting");
     setIsBusy(true);
 
-    // reset stream buffers for new turn
     streamQueueRef.current = [];
     if (streamTimerRef.current) {
       clearInterval(streamTimerRef.current);
@@ -179,7 +165,6 @@ const AdvisorSSE = forwardRef<AdvisorSSERef>((props, ref) => {
     }
     streamingMsgIdRef.current = null;
 
-    // Clean up any previous stream
     if (esRef.current) {
       esRef.current.removeAllEventListeners();
       esRef.current.close();
@@ -191,11 +176,10 @@ const AdvisorSSE = forwardRef<AdvisorSSERef>((props, ref) => {
       method: "POST",
       headers: { "Content-Type": "application/json" } as any,
       body: JSON.stringify({ query: userMsg.content }),
-      pollingInterval: 0, // do not auto-reconnect for a single run
+      pollingInterval: 0,
     });
     esRef.current = es;
 
-    // Create an empty assistant message to stream tokens into
     const assistantId = String(Date.now()) + "_assistant";
     streamingStartedRef.current = false;
     setMessages((prev) => [
@@ -223,7 +207,6 @@ const AdvisorSSE = forwardRef<AdvisorSSERef>((props, ref) => {
         if (data.stage === "reasoning") label = "Thinking…";
         if (data.stage === "fetching_product")
           label = "Fetching product details…";
-        // Update the active assistant bubble with the label only if streaming hasn't begun
         if (!streamingStartedRef.current) {
           setMessages((prev) =>
             prev.map((m) =>
@@ -231,7 +214,6 @@ const AdvisorSSE = forwardRef<AdvisorSSERef>((props, ref) => {
             )
           );
         }
-        // Keep old status top bar in sync (optional)
         if (data.stage === "retrieving") setStatus("retrieving");
         if (data.stage === "reasoning") setStatus("reasoning");
         if (data.stage === "fetching_product") setStatus("fetching_product");
@@ -247,7 +229,6 @@ const AdvisorSSE = forwardRef<AdvisorSSERef>((props, ref) => {
       } catch {}
       if (!token) return;
 
-      // First token: clear any status label in the bubble
       if (!streamingStartedRef.current) {
         streamingStartedRef.current = true;
         setMessages((prev) =>
@@ -255,10 +236,8 @@ const AdvisorSSE = forwardRef<AdvisorSSERef>((props, ref) => {
         );
       }
 
-      // enqueue characters for smooth streaming
       for (const ch of token) streamQueueRef.current.push(ch);
 
-      // start drain loop if not running
       if (!streamTimerRef.current) startDrain(assistantId, 14); // tweak speed here
     };
 
@@ -271,15 +250,12 @@ const AdvisorSSE = forwardRef<AdvisorSSERef>((props, ref) => {
         const candidates: Product[] | null = data.candidates || null;
         const mode: string | undefined = data.mode || undefined;
 
-        // attach product; keep whatever has streamed so far
         setMessages((prev) =>
           prev.map((m) =>
             m.id === assistantId ? { ...m, product, candidates, mode } : m
           )
         );
 
-        // Optional: ensure we end exactly on final rationale once queue empties
-        // If you want a perfect match, you can do this small sync after a short delay:
         setTimeout(() => {
           if (
             !streamQueueRef.current.length &&
@@ -314,7 +290,7 @@ const AdvisorSSE = forwardRef<AdvisorSSERef>((props, ref) => {
     };
 
     es.addEventListener("open", onOpen);
-    es.addEventListener("message", onOpen); // not used by server, but safe
+    es.addEventListener("message", onOpen);
     es.addEventListener("error", onOpen);
     es.addEventListener("progress", onProgress);
     es.addEventListener("tokens", onTokens);
@@ -363,58 +339,29 @@ const AdvisorSSE = forwardRef<AdvisorSSERef>((props, ref) => {
         {messages.length === 0 ? (
           <View style={styles.emptyContainer}>
             <Text style={styles.emptyText}>Hey There</Text>
-            <Text
-              style={{
-                justifyContent: "center",
-                alignItems: "center",
-                marginTop: 20,
-                fontSize: 16,
-                color: "#374151",
-                textAlign: "center",
-              }}
-            >
+            <Text style={styles.emptySubtitle}>
               I'm your AI advisor. -- ready to chat, answer and assist
             </Text>
-            <Text
-              style={{
-                justifyContent: "center",
-                alignItems: "center",
-                marginTop: 20,
-                fontSize: 18,
-                color: "#374151",
-                textAlign: "center",
-              }}
-            >
-              Just say the word.
-            </Text>
+            <Text style={styles.emptyCallToAction}>Just say the word.</Text>
           </View>
         ) : (
           messages.map((m) => (
             <View
               key={m.id}
               style={[
-                {
-                  marginVertical: 6,
-                  padding: 12,
-                  borderRadius: 12,
-                  maxWidth: "85%",
-                },
+                styles.messageBase,
                 m.role === "user"
-                  ? { alignSelf: "flex-end", backgroundColor: "#3b82f6" }
-                  : {
-                      alignSelf: "flex-start",
-                      backgroundColor: "#fff",
-                      borderWidth: 1,
-                      borderColor: "#e2e8f0",
-                    },
+                  ? styles.userMessage
+                  : styles.assistantMessage,
               ]}
             >
               <Text
-                style={{
-                  color: m.role === "user" ? "#fff" : "#111827",
-                  fontSize: 15,
-                  lineHeight: 20,
-                }}
+                style={[
+                  styles.messageText,
+                  m.role === "user"
+                    ? styles.userMessageText
+                    : styles.assistantMessageText,
+                ]}
               >
                 {m.content}
                 {m.role === "assistant" &&
@@ -431,53 +378,41 @@ const AdvisorSSE = forwardRef<AdvisorSSERef>((props, ref) => {
                     m.product?.id &&
                     router.push(`/product/${m.product.id}` as any)
                   }
-                  style={{ marginTop: 10 }}
+                  style={styles.productContainer}
                   activeOpacity={0.8}
                 >
-                  <Text style={{ fontWeight: "600", color: "#111827" }}>
+                  <Text style={styles.productTitle}>
                     {m.product.brand} — {m.product.product_name}
                   </Text>
-                  <Text style={{ color: "#6b7280", fontSize: 12 }}>
+                  <Text style={styles.productDetails}>
                     {m.product.category} • ₹{m.product.price}
                   </Text>
-                  <Text
-                    style={{ color: "#3b82f6", fontSize: 12, marginTop: 4 }}
-                  >
-                    View details →
-                  </Text>
+                  <Text style={styles.productLink}>View details →</Text>
                 </TouchableOpacity>
               ) : null}
               {/* Only show candidate products when backend marks mode as more_products */}
               {m.mode === "more_products" &&
               m.candidates &&
               m.candidates.length ? (
-                <View style={{ marginTop: 10, gap: 8 }}>
+                <View style={styles.candidatesContainer}>
                   {m.candidates.map((p, idx) => (
                     <TouchableOpacity
                       onPress={() =>
                         p?.id && router.push(`/product/${p.id}` as any)
                       }
                       key={p.id || String(idx)}
-                      style={{
-                        padding: 10,
-                        borderWidth: 1,
-                        borderColor: "#E5E7EB",
-                        borderRadius: 10,
-                        backgroundColor: "#ffffff",
-                        marginTop: idx === 0 ? 0 : 6,
-                      }}
+                      style={[
+                        styles.candidateCard,
+                        idx > 0 && styles.candidateCardSpacing,
+                      ]}
                     >
-                      <Text style={{ fontWeight: "600", color: "#111827" }}>
+                      <Text style={styles.candidateTitle}>
                         {p.brand} — {p.product_name}
                       </Text>
-                      <Text style={{ color: "#6b7280", fontSize: 12 }}>
+                      <Text style={styles.candidateDetails}>
                         {p.category} • ₹{p.price}
                       </Text>
-                      <Text
-                        style={{ color: "#3b82f6", fontSize: 12, marginTop: 4 }}
-                      >
-                        View details →
-                      </Text>
+                      <Text style={styles.candidateLink}>View details →</Text>
                     </TouchableOpacity>
                   ))}
                 </View>
@@ -530,36 +465,34 @@ const Advisor = () => {
 export default Advisor;
 
 const styles = StyleSheet.create({
+  // Main container
+  mainContainer: {
+    flex: 1,
+  },
+
+  // Header styles
+  headerContainer: {
+    width: "100%",
+    backgroundColor: "#F8FAFC",
+    paddingBottom: 16,
+    flexDirection: "row",
+    justifyContent: "space-between",
+    borderWidth: 1,
+    borderColor: "#E5E7EB",
+  },
+  headerButton: {
+    width: "15%",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+
+  // Chat container
   chatContainer: {
     flex: 1,
     backgroundColor: "#F8FAFC",
   },
-  statusContainer: {
-    flexDirection: "row",
-    alignItems: "center",
-    padding: 10,
-    backgroundColor: "#007AFF",
-    borderBottomWidth: 0,
-  },
-  statusDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    marginRight: 8,
-  },
-  statusText: {
-    fontSize: 12,
-    color: "#ffffff",
-    flex: 1,
-  },
-  seedBtn: {
-    flexDirection: "row",
-    backgroundColor: "#FFD700",
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 8,
-    alignItems: "center",
-  },
+
+  // Messages
   messagesContainer: {
     flex: 1,
     paddingHorizontal: 16,
@@ -567,20 +500,114 @@ const styles = StyleSheet.create({
   messagesContent: {
     paddingVertical: 16,
   },
+
+  // Empty state
   emptyContainer: {
     flex: 1,
     justifyContent: "center",
     alignItems: "center",
     paddingHorizontal: 32,
     height: "100%",
-    // backgroundColor: "red",
   },
   emptyText: {
     fontSize: 26,
-    fontWeight: "black",
+    fontWeight: "900",
     color: "black",
     textAlign: "center",
   },
+  emptySubtitle: {
+    justifyContent: "center",
+    alignItems: "center",
+    marginTop: 20,
+    fontSize: 16,
+    color: "#374151",
+    textAlign: "center",
+  },
+  emptyCallToAction: {
+    justifyContent: "center",
+    alignItems: "center",
+    marginTop: 20,
+    fontSize: 18,
+    color: "#374151",
+    textAlign: "center",
+  },
+
+  // Message bubbles
+  messageBase: {
+    marginVertical: 6,
+    padding: 12,
+    borderRadius: 12,
+    maxWidth: "85%",
+  },
+  userMessage: {
+    alignSelf: "flex-end",
+    backgroundColor: "#3b82f6",
+  },
+  assistantMessage: {
+    alignSelf: "flex-start",
+    backgroundColor: "#fff",
+    borderWidth: 1,
+    borderColor: "#e2e8f0",
+  },
+  messageText: {
+    fontSize: 15,
+    lineHeight: 20,
+  },
+  userMessageText: {
+    color: "#fff",
+  },
+  assistantMessageText: {
+    color: "#111827",
+  },
+
+  // Product display
+  productContainer: {
+    marginTop: 10,
+  },
+  productTitle: {
+    fontWeight: "600",
+    color: "#111827",
+  },
+  productDetails: {
+    color: "#6b7280",
+    fontSize: 12,
+  },
+  productLink: {
+    color: "#3b82f6",
+    fontSize: 12,
+    marginTop: 4,
+  },
+
+  // Candidates
+  candidatesContainer: {
+    marginTop: 10,
+    gap: 8,
+  },
+  candidateCard: {
+    padding: 10,
+    borderWidth: 1,
+    borderColor: "#E5E7EB",
+    borderRadius: 10,
+    backgroundColor: "#ffffff",
+  },
+  candidateCardSpacing: {
+    marginTop: 6,
+  },
+  candidateTitle: {
+    fontWeight: "600",
+    color: "#111827",
+  },
+  candidateDetails: {
+    color: "#6b7280",
+    fontSize: 12,
+  },
+  candidateLink: {
+    color: "#3b82f6",
+    fontSize: 12,
+    marginTop: 4,
+  },
+
+  // Input container
   inputContainer: {
     flexDirection: "row",
     padding: 16,
@@ -606,6 +633,34 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     padding: 8,
     justifyContent: "center",
+    alignItems: "center",
+  },
+
+  // Unused styles (kept for reference)
+  statusContainer: {
+    flexDirection: "row",
+    alignItems: "center",
+    padding: 10,
+    backgroundColor: "#007AFF",
+    borderBottomWidth: 0,
+  },
+  statusDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    marginRight: 8,
+  },
+  statusText: {
+    fontSize: 12,
+    color: "#ffffff",
+    flex: 1,
+  },
+  seedBtn: {
+    flexDirection: "row",
+    backgroundColor: "#FFD700",
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 8,
     alignItems: "center",
   },
 });

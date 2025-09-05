@@ -1,9 +1,11 @@
+/* eslint-disable react/no-unescaped-entities */
 import {
   Text,
   View,
   TouchableOpacity,
   Image,
   ImageBackground,
+  StyleSheet,
 } from "react-native";
 import { router } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -13,100 +15,33 @@ import { StatusBar } from "expo-status-bar";
 
 export default function Index() {
   return (
-    <View
-      style={{
-        height: "100%",
-        width: "100%",
-        justifyContent: "center",
-        alignItems: "center",
-      }}
-    >
+    <View style={styles.container}>
       <StatusBar style="light" backgroundColor="#000000" translucent={false} />
       <ImageBackground
         source={require("../assets/images/StoreBG.webp")}
-        style={{
-          height: "100%",
-          width: "100%",
-          justifyContent: "center",
-          alignItems: "center",
-          backgroundColor: "#ffffff",
-        }}
+        style={styles.backgroundImage}
         resizeMode="cover"
       >
-        <View
-          style={{
-            width: "100%",
-            height: "100%",
-            position: "absolute",
-            top: 0,
-            left: 0,
-            backgroundColor: "rgba(0, 0, 0, 0.5)",
-          }}
-        />
+        <View style={styles.overlay} />
 
-        <SafeAreaView style={{ width: "100%", flex: 1 }}>
-          <View
-            style={{
-              flex: 1,
-              justifyContent: "center",
-              alignItems: "center",
-              gap: 30,
-            }}
-          >
-            <View
-              style={{
-                width: 140,
-                height: 140,
-                backgroundColor: "#01296b",
-                borderRadius: 16,
-                borderWidth: 2,
-                borderColor: "#E5E7EB",
-              }}
-            >
+        <SafeAreaView style={styles.safeArea}>
+          <View style={styles.content}>
+            <View style={styles.logoContainer}>
               <Image
                 source={require("../assets/images/without-bg-logo_1.webp")}
-                style={{ width: "100%", height: "100%", resizeMode: "contain" }}
+                style={styles.logo}
               />
             </View>
-            {/* header and subheading */}
-            <View
-              style={{
-                gap: 10,
-                marginTop: 30,
-                alignItems: "center",
-                display: "flex",
-                justifyContent: "center",
-                // width: "90%",
-                padding: 20,
-              }}
-            >
-              <Text
-                style={{
-                  color: "white",
-                  textAlign: "center",
-                  fontSize: 36,
-                  fontWeight: "bold",
-                }}
-              >
-                Epik Assistant
-              </Text>
-              <Text
-                style={{
-                  color: "white",
-                  width: "80%",
-                  textAlign: "center",
-                  lineHeight: 22, // Add line height for better readability
-                  fontSize: 14,
-                  // paddingHorizontal: 20, // Add horizontal padding to force wrapping
-                  maxWidth: "80%",
-                }}
-              >
+
+            <View style={styles.headerContainer}>
+              <Text style={styles.title}>Epik Assistant</Text>
+              <Text style={styles.subtitle}>
                 Your intelligent shopping assistant. Just tell us what you need,
                 and we'll recommend the perfect products for you.
               </Text>
             </View>
-            {/* usps */}
-            <View style={{ gap: 20, marginTop: 30 }}>
+
+            <View style={styles.uspContainer}>
               <HomeScreenUsp
                 icon={<MessageCircle color={"#FFD700"} size={25} />}
                 text={"AI personalized recommendations"}
@@ -115,7 +50,7 @@ export default function Index() {
                 icon={
                   <Image
                     source={require("../assets/images/without-bg-logo_1.webp")}
-                    style={{ width: 25, height: 25 }}
+                    style={styles.uspIcon}
                     resizeMode="contain"
                   />
                 }
@@ -127,44 +62,15 @@ export default function Index() {
               />
             </View>
           </View>
-          {/* footer button */}
-          <View
-            style={{
-              width: "100%",
-              padding: 20,
-              justifyContent: "center",
-              alignItems: "center",
-              gap: 20,
-            }}
-          >
+
+          <View style={styles.footer}>
             <TouchableOpacity
               onPress={() => router.push("/conversation" as any)}
-              style={{
-                backgroundColor: "#007AFF",
-                width: "90%",
-                paddingVertical: 15,
-                justifyContent: "center",
-                alignItems: "center",
-                borderRadius: 10,
-              }}
+              style={styles.getStartedButton}
             >
-              <Text
-                style={{
-                  color: "#FFFFFF",
-                  fontSize: 18,
-                  fontWeight: "semibold",
-                }}
-              >
-                Get Started
-              </Text>
+              <Text style={styles.buttonText}>Get Started</Text>
             </TouchableOpacity>
-            <Text
-              style={{
-                color: "#64748B",
-                fontSize: 10,
-                fontWeight: "semibold",
-              }}
-            >
+            <Text style={styles.footerText}>
               Start your personalized shopping experience
             </Text>
           </View>
@@ -173,3 +79,103 @@ export default function Index() {
     </View>
   );
 }
+const styles = StyleSheet.create({
+  container: {
+    height: "100%",
+    width: "100%",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  backgroundImage: {
+    height: "100%",
+    width: "100%",
+    justifyContent: "center",
+    alignItems: "center",
+    backgroundColor: "#ffffff",
+  },
+  overlay: {
+    width: "100%",
+    height: "100%",
+    position: "absolute",
+    top: 0,
+    left: 0,
+    backgroundColor: "rgba(0, 0, 0, 0.5)",
+  },
+  safeArea: {
+    width: "100%",
+    flex: 1,
+  },
+  content: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+    gap: 30,
+  },
+  logoContainer: {
+    width: 140,
+    height: 140,
+    backgroundColor: "#01296b",
+    borderRadius: 16,
+    borderWidth: 2,
+    borderColor: "#E5E7EB",
+  },
+  logo: {
+    width: "100%",
+    height: "100%",
+    resizeMode: "contain",
+  },
+  headerContainer: {
+    gap: 10,
+    marginTop: 30,
+    alignItems: "center",
+    display: "flex",
+    justifyContent: "center",
+    padding: 20,
+  },
+  title: {
+    color: "white",
+    textAlign: "center",
+    fontSize: 36,
+    fontWeight: "bold",
+  },
+  subtitle: {
+    color: "white",
+    width: "80%",
+    textAlign: "center",
+    lineHeight: 22,
+    maxWidth: "80%",
+  },
+  uspContainer: {
+    gap: 20,
+    marginTop: 30,
+  },
+  uspIcon: {
+    width: 25,
+    height: 25,
+  },
+  footer: {
+    width: "100%",
+    padding: 20,
+    justifyContent: "center",
+    alignItems: "center",
+    gap: 20,
+  },
+  getStartedButton: {
+    backgroundColor: "#007AFF",
+    width: "90%",
+    paddingVertical: 15,
+    justifyContent: "center",
+    alignItems: "center",
+    borderRadius: 10,
+  },
+  buttonText: {
+    color: "#FFFFFF",
+    fontSize: 18,
+    fontWeight: "semibold",
+  },
+  footerText: {
+    color: "#64748B",
+    fontSize: 10,
+    fontWeight: "semibold",
+  },
+});
