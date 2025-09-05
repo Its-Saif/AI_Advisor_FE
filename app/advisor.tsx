@@ -1,4 +1,11 @@
-import React, { useEffect, useRef, useState, useCallback } from "react";
+import React, {
+  useEffect,
+  useRef,
+  useState,
+  useCallback,
+  forwardRef,
+  useImperativeHandle,
+} from "react";
 import {
   KeyboardAvoidingView,
   Platform,
@@ -10,10 +17,11 @@ import {
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { ArrowLeft, Send, ShoppingCart, Database } from "lucide-react-native";
+import { ArrowLeft, SendHorizonalIcon, X } from "lucide-react-native";
 import { router } from "expo-router";
 import EventSource, { EventSourceListener } from "react-native-sse";
 import "react-native-url-polyfill/auto";
+import { StatusBar } from "expo-status-bar";
 
 const BASE_URL = "http://192.168.1.7:3000"; // CHANGE to your machine’s LAN IP:PORT
 
@@ -31,88 +39,62 @@ type ChatMsg = {
   role: "user" | "assistant";
   content: string;
   product?: Product | null;
+  candidates?: Product[] | null;
+  mode?: "more_products" | "single" | string;
 };
 
 type SSEEvents = "progress" | "final" | "error" | "tokens";
 
-const Header = () => {
+const Header = ({
+  onClearConversation,
+}: {
+  onClearConversation: () => void;
+}) => {
   const insets = useSafeAreaInsets();
   const { top } = insets;
   return (
     <View
       style={{
         width: "100%",
-        backgroundColor: "#1e293b",
+        backgroundColor: "#F8FAFC",
         paddingTop: top + 10,
-        paddingBottom: 20,
+        paddingBottom: 16,
         flexDirection: "row",
+        justifyContent: "space-between",
+        borderWidth: 1,
+        borderColor: "#E5E7EB",
       }}
     >
       <TouchableOpacity
         onPress={() => router.back()}
-        style={{ width: "10%", justifyContent: "center", alignItems: "center" }}
+        style={{ width: "15%", justifyContent: "center", alignItems: "center" }}
       >
-        <ArrowLeft color={"#FFD700"} size={24} />
+        <ArrowLeft color={"#007AFF"} size={24} />
       </TouchableOpacity>
-      <View
-        style={{
-          width: "80%",
-          flexDirection: "row",
-          justifyContent: "center",
-          alignItems: "center",
-        }}
+      <TouchableOpacity
+        onPress={onClearConversation}
+        style={{ width: "15%", justifyContent: "center", alignItems: "center" }}
       >
-        <Text
-          style={{
-            color: "white",
-            fontSize: 20,
-            fontWeight: "bold",
-            width: "100%",
-            textAlign: "center",
-            flex: 1,
-          }}
-        >
-          Advisor
-        </Text>
-      </View>
-      <View
-        style={{ width: "10%", justifyContent: "center", alignItems: "center" }}
-      >
-        <ShoppingCart color={"#FFD700"} size={24} />
-      </View>
+        <X color={"#007AFF"} size={24} />
+      </TouchableOpacity>
     </View>
   );
 };
 
-const Footer = () => {
-  const insets = useSafeAreaInsets();
-  const { bottom } = insets;
-  return (
-    <View
-      style={{
-        width: "100%",
-        backgroundColor: "#1e293b",
-        paddingBottom: bottom + 10,
-      }}
-    >
-      <View
-        style={{
-          padding: 10,
-          flexDirection: "row",
-          justifyContent: "space-between",
-          alignItems: "center",
-        }}
-      >
-        <Text style={{ color: "white" }}>Footer Content</Text>
-      </View>
-    </View>
-  );
-};
+interface AdvisorSSERef {
+  clearConversation: () => Promise<void>;
+}
 
-const AdvisorSSE = () => {
+const AdvisorSSE = forwardRef<AdvisorSSERef>((props, ref) => {
   const [queryText, setQueryText] = useState("");
   const [status, setStatus] = useState<
-    "idle" | "connecting" | "retrieving" | "reasoning" | "fetching_product" | "done" | "error"
+    | "idle"
+    | "connecting"
+    | "retrieving"
+    | "reasoning"
+    | "fetching_product"
+    | "done"
+    | "error"
   >("idle");
   const [messages, setMessages] = useState<ChatMsg[]>([]);
   const [isBusy, setIsBusy] = useState(false);
@@ -121,7 +103,7 @@ const AdvisorSSE = () => {
 
   // Streaming machinery
   const streamQueueRef = useRef<string[]>([]);
-  const streamTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const streamTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const streamingMsgIdRef = useRef<string | null>(null);
   const streamingStartedRef = useRef<boolean>(false);
 
@@ -135,9 +117,11 @@ const AdvisorSSE = () => {
         streamTimerRef.current = null;
         return;
       }
-      setMessages(prev =>
-        prev.map(m =>
-          m.id === streamingMsgIdRef.current ? { ...m, content: m.content + ch } : m
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.id === streamingMsgIdRef.current
+            ? { ...m, content: m.content + ch }
+            : m
         )
       );
     }, intervalMs);
@@ -145,36 +129,32 @@ const AdvisorSSE = () => {
 
   // Clean up timer when unmounting or starting a new run
   useEffect(() => {
+    (async () => {
+      try {
+        const res = await fetch(`${BASE_URL}/messages`);
+        const json = await res.json();
+        const restored = (json.messages || []).map((m: any) => ({
+          id: String(m.id),
+          role: m.role,
+          content: m.content,
+          product: m.product || undefined,
+          candidates: m.candidates || undefined,
+          mode: m.mode || undefined,
+        }));
+        setMessages(restored);
+      } catch {}
+    })();
     return () => {
       if (streamTimerRef.current) {
         clearInterval(streamTimerRef.current);
         streamTimerRef.current = null;
       }
-    };
-  }, []);
-
-  useEffect(() => {
-    return () => {
       if (esRef.current) {
         esRef.current.removeAllEventListeners();
         esRef.current.close();
         esRef.current = null;
       }
     };
-  }, []);
-
-  const seedCatalog = useCallback(async () => {
-    try {
-      setIsBusy(true);
-      const res = await fetch(`${BASE_URL}/ingest`, { method: "POST" });
-      const json = await res.json();
-      setStatus("idle");
-      alert(json.ok ? "Ingest successful" : "Ingest failed");
-    } catch (e: any) {
-      alert("Ingest failed: " + (e?.message || "Unknown error"));
-    } finally {
-      setIsBusy(false);
-    }
   }, []);
 
   const startAdvice = useCallback(() => {
@@ -241,11 +221,14 @@ const AdvisorSSE = () => {
         let label = "Processing…";
         if (data.stage === "retrieving") label = "Searching products…";
         if (data.stage === "reasoning") label = "Thinking…";
-        if (data.stage === "fetching_product") label = "Fetching product details…";
+        if (data.stage === "fetching_product")
+          label = "Fetching product details…";
         // Update the active assistant bubble with the label only if streaming hasn't begun
         if (!streamingStartedRef.current) {
           setMessages((prev) =>
-            prev.map((m) => (m.id === assistantId ? { ...m, content: label } : m))
+            prev.map((m) =>
+              m.id === assistantId ? { ...m, content: label } : m
+            )
           );
         }
         // Keep old status top bar in sync (optional)
@@ -285,18 +268,23 @@ const AdvisorSSE = () => {
         const data = JSON.parse(ev.data || "{}");
         const product: Product | null = data.product || null;
         const rationale: string = data.rationale || "";
+        const candidates: Product[] | null = data.candidates || null;
+        const mode: string | undefined = data.mode || undefined;
 
         // attach product; keep whatever has streamed so far
         setMessages((prev) =>
           prev.map((m) =>
-            m.id === assistantId ? { ...m, product } : m
+            m.id === assistantId ? { ...m, product, candidates, mode } : m
           )
         );
 
         // Optional: ensure we end exactly on final rationale once queue empties
         // If you want a perfect match, you can do this small sync after a short delay:
         setTimeout(() => {
-          if (!streamQueueRef.current.length && streamingMsgIdRef.current === assistantId) {
+          if (
+            !streamQueueRef.current.length &&
+            streamingMsgIdRef.current === assistantId
+          ) {
             setMessages((prev) =>
               prev.map((m) =>
                 m.id === assistantId ? { ...m, content: rationale } : m
@@ -341,63 +329,30 @@ const AdvisorSSE = () => {
       scrollViewRef.current?.scrollToEnd({ animated: true });
     }, 80);
   }, [messages, status]);
-  useEffect(() => {
-    (async () => {
-      try {
-        const res = await fetch(`${BASE_URL}/messages`);
-        const json = await res.json();
-        const restored = (json.messages || []).map((m: any) => ({
-          id: String(m.id),
-          role: m.role,
-          content: m.content,
-          product: m.product || undefined,
-          candidates: m.candidates || undefined,
-        }));
-        setMessages(restored);
-      } catch {}
-    })();
-  }, []);
 
-  const statusLabel =
-    status === "idle"
-      ? "Idle"
-      : status === "connecting"
-      ? "Connecting…"
-      : status === "retrieving"
-      ? "Searching products…"
-      : status === "reasoning"
-      ? "Thinking…"
-      : status === "fetching_product"
-      ? "Fetching product details…"
-      : status === "done"
-      ? "Done"
-      : "Error";
+  const clearConversation = async () => {
+    try {
+      setIsBusy(true);
+      await fetch(`${BASE_URL}/messages/clear`, { method: "POST" });
+      setMessages([]);
+      setStatus("idle");
+    } finally {
+      setIsBusy(false);
+    }
+  };
 
+  useImperativeHandle(ref, () => ({
+    clearConversation,
+  }));
+
+  console.log(messages);
+  AdvisorSSE.displayName = "AdvisorSSE";
   return (
     <KeyboardAvoidingView
       style={styles.chatContainer}
       behavior={Platform.OS === "ios" ? "padding" : "height"}
     >
-      <View style={styles.statusContainer}>
-        <View
-          style={[
-            styles.statusDot,
-            {
-              backgroundColor:
-                status === "error" ? "#ef4444" : status === "done" ? "#10b981" : "#f59e0b",
-            },
-          ]}
-        />
-        <Text style={styles.statusText}>{statusLabel}</Text>
-        <TouchableOpacity
-          style={[styles.seedBtn, { opacity: isBusy ? 0.6 : 1 }]}
-          onPress={seedCatalog}
-          disabled={isBusy}
-        >
-          <Database color="#fff" size={16} />
-          <Text style={{ color: "#fff", marginLeft: 6 }}>Seed catalog</Text>
-        </TouchableOpacity>
-      </View>
+      <StatusBar style="dark" translucent={true} />
 
       <ScrollView
         ref={scrollViewRef}
@@ -407,8 +362,30 @@ const AdvisorSSE = () => {
       >
         {messages.length === 0 ? (
           <View style={styles.emptyContainer}>
-            <Text style={styles.emptyText}>
-              Describe your needs and get the best product recommendation.
+            <Text style={styles.emptyText}>Hey There</Text>
+            <Text
+              style={{
+                justifyContent: "center",
+                alignItems: "center",
+                marginTop: 20,
+                fontSize: 16,
+                color: "#374151",
+                textAlign: "center",
+              }}
+            >
+              I'm your AI advisor. -- ready to chat, answer and assist
+            </Text>
+            <Text
+              style={{
+                justifyContent: "center",
+                alignItems: "center",
+                marginTop: 20,
+                fontSize: 18,
+                color: "#374151",
+                textAlign: "center",
+              }}
+            >
+              Just say the word.
             </Text>
           </View>
         ) : (
@@ -416,24 +393,93 @@ const AdvisorSSE = () => {
             <View
               key={m.id}
               style={[
-                { marginVertical: 6, padding: 12, borderRadius: 12, maxWidth: "85%" },
+                {
+                  marginVertical: 6,
+                  padding: 12,
+                  borderRadius: 12,
+                  maxWidth: "85%",
+                },
                 m.role === "user"
                   ? { alignSelf: "flex-end", backgroundColor: "#3b82f6" }
-                  : { alignSelf: "flex-start", backgroundColor: "#fff", borderWidth: 1, borderColor: "#e2e8f0" },
+                  : {
+                      alignSelf: "flex-start",
+                      backgroundColor: "#fff",
+                      borderWidth: 1,
+                      borderColor: "#e2e8f0",
+                    },
               ]}
             >
-              <Text style={{ color: m.role === "user" ? "#fff" : "#111827", fontSize: 15, lineHeight: 20 }}>
+              <Text
+                style={{
+                  color: m.role === "user" ? "#fff" : "#111827",
+                  fontSize: 15,
+                  lineHeight: 20,
+                }}
+              >
                 {m.content}
-                {m.role === "assistant" && streamingMsgIdRef.current === m.id && status !== "done" && status !== "error" ? " ▍" : ""}
+                {m.role === "assistant" &&
+                streamingMsgIdRef.current === m.id &&
+                status !== "done" &&
+                status !== "error"
+                  ? " ▍"
+                  : ""}
               </Text>
+              {/* Show the primary selected product when present */}
               {m.product ? (
-                <View style={{ marginTop: 10 }}>
+                <TouchableOpacity
+                  onPress={() =>
+                    m.product?.id &&
+                    router.push(`/product/${m.product.id}` as any)
+                  }
+                  style={{ marginTop: 10 }}
+                  activeOpacity={0.8}
+                >
                   <Text style={{ fontWeight: "600", color: "#111827" }}>
                     {m.product.brand} — {m.product.product_name}
                   </Text>
                   <Text style={{ color: "#6b7280", fontSize: 12 }}>
                     {m.product.category} • ₹{m.product.price}
                   </Text>
+                  <Text
+                    style={{ color: "#3b82f6", fontSize: 12, marginTop: 4 }}
+                  >
+                    View details →
+                  </Text>
+                </TouchableOpacity>
+              ) : null}
+              {/* Only show candidate products when backend marks mode as more_products */}
+              {m.mode === "more_products" &&
+              m.candidates &&
+              m.candidates.length ? (
+                <View style={{ marginTop: 10, gap: 8 }}>
+                  {m.candidates.map((p, idx) => (
+                    <TouchableOpacity
+                      onPress={() =>
+                        p?.id && router.push(`/product/${p.id}` as any)
+                      }
+                      key={p.id || String(idx)}
+                      style={{
+                        padding: 10,
+                        borderWidth: 1,
+                        borderColor: "#E5E7EB",
+                        borderRadius: 10,
+                        backgroundColor: "#ffffff",
+                        marginTop: idx === 0 ? 0 : 6,
+                      }}
+                    >
+                      <Text style={{ fontWeight: "600", color: "#111827" }}>
+                        {p.brand} — {p.product_name}
+                      </Text>
+                      <Text style={{ color: "#6b7280", fontSize: 12 }}>
+                        {p.category} • ₹{p.price}
+                      </Text>
+                      <Text
+                        style={{ color: "#3b82f6", fontSize: 12, marginTop: 4 }}
+                      >
+                        View details →
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
                 </View>
               ) : null}
             </View>
@@ -442,68 +488,58 @@ const AdvisorSSE = () => {
       </ScrollView>
 
       <View style={styles.inputContainer}>
-      <TouchableOpacity
-  style={[styles.seedBtn, { marginRight: 8, backgroundColor: '#ef4444', opacity: isBusy ? 0.6 : 1 }]}
-  onPress={async () => {
-    try {
-      setIsBusy(true);
-      await fetch(`${BASE_URL}/messages/clear`, { method: 'POST' });
-      setMessages([]);
-      setStatus('idle');
-    } finally {
-      setIsBusy(false);
-    }
-  }}
-  disabled={isBusy}
->
-  <Text style={{ color: '#fff' }}>Clear chat</Text>
-</TouchableOpacity>
         <TextInput
           style={styles.textInput}
           value={queryText}
           onChangeText={setQueryText}
-          placeholder="e.g., I need a device for neck and shoulder relief"
+          placeholder="What Product are you looking for?"
           placeholderTextColor="#9ca3af"
           multiline
           maxLength={500}
           editable={!isBusy}
         />
         <TouchableOpacity
-          style={[styles.sendButton, { opacity: queryText.trim() && !isBusy ? 1 : 0.5 }]}
+          style={[
+            styles.sendButton,
+            { opacity: queryText.trim() && !isBusy ? 1 : 0.5 },
+          ]}
           onPress={startAdvice}
           disabled={!queryText.trim() || isBusy}
         >
-          <Send color="#fff" size={20} />
+          <SendHorizonalIcon color="#fff" size={31} />
         </TouchableOpacity>
       </View>
     </KeyboardAvoidingView>
   );
-};
+});
 
-const advisor = () => {
+const Advisor = () => {
+  const advisorSSERef = useRef<AdvisorSSERef>(null);
+
+  const handleClearConversation = () => {
+    advisorSSERef.current?.clearConversation();
+  };
   return (
     <View style={{ flex: 1 }}>
-      <Header />
-      <AdvisorSSE />
-      <Footer />
+      <Header onClearConversation={handleClearConversation} />
+      <AdvisorSSE ref={advisorSSERef} />
     </View>
   );
 };
 
-export default advisor;
+export default Advisor;
 
 const styles = StyleSheet.create({
   chatContainer: {
     flex: 1,
-    backgroundColor: "#f8fafc",
+    backgroundColor: "#F8FAFC",
   },
   statusContainer: {
     flexDirection: "row",
     alignItems: "center",
     padding: 10,
-    backgroundColor: "#1f2937",
-    borderBottomWidth: 1,
-    borderBottomColor: "#0b1220",
+    backgroundColor: "#007AFF",
+    borderBottomWidth: 0,
   },
   statusDot: {
     width: 8,
@@ -513,12 +549,12 @@ const styles = StyleSheet.create({
   },
   statusText: {
     fontSize: 12,
-    color: "#e5e7eb",
+    color: "#ffffff",
     flex: 1,
   },
   seedBtn: {
     flexDirection: "row",
-    backgroundColor: "#3b82f6",
+    backgroundColor: "#FFD700",
     paddingHorizontal: 10,
     paddingVertical: 6,
     borderRadius: 8,
@@ -536,10 +572,13 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     alignItems: "center",
     paddingHorizontal: 32,
+    height: "100%",
+    // backgroundColor: "red",
   },
   emptyText: {
-    fontSize: 16,
-    color: "#9ca3af",
+    fontSize: 26,
+    fontWeight: "black",
+    color: "black",
     textAlign: "center",
   },
   inputContainer: {
@@ -553,8 +592,8 @@ const styles = StyleSheet.create({
   textInput: {
     flex: 1,
     borderWidth: 1,
-    borderColor: "#d1d5db",
-    borderRadius: 24,
+    borderColor: "#CBD5E1",
+    borderRadius: 10,
     paddingHorizontal: 16,
     paddingVertical: 12,
     fontSize: 16,
@@ -563,9 +602,9 @@ const styles = StyleSheet.create({
     color: "#1f2937",
   },
   sendButton: {
-    backgroundColor: "#3b82f6",
-    borderRadius: 24,
-    padding: 12,
+    backgroundColor: "#007AFF",
+    borderRadius: 10,
+    padding: 8,
     justifyContent: "center",
     alignItems: "center",
   },

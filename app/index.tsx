@@ -1,12 +1,15 @@
-import { Text, View, TouchableOpacity, Image } from "react-native";
+import {
+  Text,
+  View,
+  TouchableOpacity,
+  Image,
+  ImageBackground,
+} from "react-native";
 import { router } from "expo-router";
-import { ImageBackground } from "expo-image";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { withDecay } from "react-native-reanimated";
 import { MessageCircle, Sparkles } from "lucide-react-native";
 import { HomeScreenUsp } from "./Components/HomeScreenUsp";
 import { StatusBar } from "expo-status-bar";
-import { BlurView } from "expo-blur";
 
 export default function Index() {
   return (
@@ -26,8 +29,9 @@ export default function Index() {
           width: "100%",
           justifyContent: "center",
           alignItems: "center",
+          backgroundColor: "#ffffff",
         }}
-        contentFit="cover"
+        resizeMode="cover"
       >
         <View
           style={{
@@ -39,6 +43,7 @@ export default function Index() {
             backgroundColor: "rgba(0, 0, 0, 0.5)",
           }}
         />
+
         <SafeAreaView style={{ width: "100%", flex: 1 }}>
           <View
             style={{
@@ -48,37 +53,14 @@ export default function Index() {
               gap: 30,
             }}
           >
-            {/*
-
-            <TouchableOpacity
-              onPress={() => router.push("/catalog")}
-              style={{
-                backgroundColor: "#007AFF",
-                padding: 15,
-                borderRadius: 8,
-              }}
-            >
-              <Text style={{ color: "white" }}>Go to Catalog</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              onPress={() => router.push("/advisor")}
-              style={{
-                backgroundColor: "#007AFF",
-                padding: 15,
-                borderRadius: 8,
-              }}
-            >
-              <Text style={{ color: "white" }}>Go to Advisor</Text>
-            </TouchableOpacity> */}
-            {/* Logo */}
             <View
               style={{
-                width: 120,
-                height: 120,
-                backgroundColor: "#01296B",
-                borderRadius: 6,
-                borderWidth: 4,
-                borderColor: "rgba(255, 255, 255, 0.3)",
+                width: 140,
+                height: 140,
+                backgroundColor: "#01296b",
+                borderRadius: 16,
+                borderWidth: 2,
+                borderColor: "#E5E7EB",
               }}
             >
               <Image
@@ -156,19 +138,19 @@ export default function Index() {
             }}
           >
             <TouchableOpacity
-              onPress={() => router.push("/advisor")}
+              onPress={() => router.push("/conversation" as any)}
               style={{
-                backgroundColor: "#FFD700",
+                backgroundColor: "#007AFF",
                 width: "90%",
                 paddingVertical: 15,
                 justifyContent: "center",
                 alignItems: "center",
-                borderRadius: 6,
+                borderRadius: 10,
               }}
             >
               <Text
                 style={{
-                  color: "#01296B",
+                  color: "#FFFFFF",
                   fontSize: 18,
                   fontWeight: "semibold",
                 }}
@@ -178,7 +160,7 @@ export default function Index() {
             </TouchableOpacity>
             <Text
               style={{
-                color: "white",
+                color: "#64748B",
                 fontSize: 10,
                 fontWeight: "semibold",
               }}
