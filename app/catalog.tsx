@@ -24,7 +24,9 @@ type Product = {
   description: string;
 };
 
-const BASE_URL = `${process.env.EXPO_PUBLIC_API_BASE_URL}:3000`;
+// const BASE_URL = `${process.env.EXPO_PUBLIC_API_BASE_URL}:3000`;
+const BASE_URL =
+  process.env.EXPO_PUBLIC_API_BASE_URL || "http://192.168.1.6:3000";
 
 export default function Catalog() {
   const [query, setQuery] = useState("");
@@ -51,7 +53,7 @@ export default function Catalog() {
       if (query.trim()) params.set("q", query.trim());
       if (category) {
         params.set("category", category);
-        params.set("all", "true"); // when filtering, fetch all results (no pagination)
+        params.set("all", "true");
       }
 
       const res = await fetch(`${BASE_URL}/products?${params.toString()}`);
